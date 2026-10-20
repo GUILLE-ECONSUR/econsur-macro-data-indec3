@@ -40,6 +40,11 @@ API Series de Tiempo ──► scripts/build-series.mjs ──► src/data/serie
   en el build (descomposición clásica multiplicativa). Es una estimación, no el X-13 del INDEC; el build
   imprime un control contra la oficial del nivel general. Los IDs se pueden fijar en
   `data/series-overrides.json` (claves `total`, `tc`, `A`…`O`, `IN`; con sufijo `_sa` para la desest.).
+- **Meses faltantes en el EMAE:** si la API publica un mes vacío, la tabla lo muestra como “—” (con trama),
+  avisa cuántos meses faltan en el período y lista las series afectadas en “Calidad de datos”. Para el nivel
+  general y la tendencia-ciclo, el build reconstruye esos meses con las series oficiales de variación
+  (`143.3_ICE_SERVIA_2004_A_25` interanual, `143.3_ICE_SER_VM_2004_A_34` y `…_31` mensuales) y los marca en cursiva.
+  `SERIES_VERBOSE=1 npm run emae` imprime por serie `API-null` (filas vacías en la API), `reconstruidos` y `FALTAN`.
 - El catálogo está en `scripts/series-config.mjs`: por cada variable define frecuencia, agregación a
   trimestre (promedio / suma / fin de período) y tipo de variación (% / p.p. / diferencia).
 - Cada serie se resuelve por: `data/series-overrides.json` → IDs conocidos → búsqueda por texto.

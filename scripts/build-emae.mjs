@@ -14,10 +14,12 @@ const OVERRIDES = path.join(ROOT, 'data', 'series-overrides.json')
 const BASE = process.env.SERIES_API_BASE || 'https://apis.datos.gob.ar/series/api'
 const START = '2004-01-01'
 
+// 'yoy' / 'mom' / 'samom' (opcionales): series OFICIALES de variación % interanual / mensual (original / desest.)
+// que permiten reconstruir meses que la API publica vacíos. Claves en overrides: <key>_yoy, <key>_mom, <key>_samom.
 // Claves para data/series-overrides.json: "<key>" fija la serie original; "<key>_sa" la desestacionalizada.
 const SERIES = [
-  { key: 'total', label: 'EMAE nivel general', group: 'Nivel general', orig: '143.3_NO_PR_2004_A_21', sa: '143.3_NO_PR_2004_A_31' },
-  { key: 'tc', label: 'EMAE tendencia-ciclo', group: 'Nivel general', orig: '143.3_NO_PR_2004_A_28' },
+  { key: 'total', label: 'EMAE nivel general', group: 'Nivel general', orig: '143.3_NO_PR_2004_A_21', sa: '143.3_NO_PR_2004_A_31', yoy: '143.3_ICE_SERVIA_2004_A_25', samom: '143.3_ICE_SER_VM_2004_A_34' },
+  { key: 'tc', label: 'EMAE tendencia-ciclo', group: 'Nivel general', orig: '143.3_NO_PR_2004_A_28', mom: '143.3_ICE_SER_VM_2004_A_31' },
   { key: 'A', label: 'A · Agricultura, ganadería, caza y silvicultura', group: 'Sectores', orig: '11.3_ISOM_2004_M_39' },
   { key: 'B', label: 'B · Pesca', group: 'Sectores', orig: '11.3_VIPAA_2004_M_5' },
   { key: 'C', label: 'C · Explotación de minas y canteras', group: 'Sectores', orig: '11.3_ISD_2004_M_26' },
@@ -66,11 +68,12 @@ async function fetchMonthly(id) {
     if (d.length < 1000) break
   }
   const map = {}
-  for (const [d, v] of rows) if (typeof v === 'number') map[d.slice(0, 7)] = v
+  const nulls = []
+  for (const [d, v] of rows) { if (typeof v === 'number') map[d.slice(0, 7)] = v; else nulls.push(d.slice(0, 7)) }
   const keys = Object.keys(map)
   if (!keys.length) return null
   const field = meta?.find((m) => m?.field)?.field ?? {}
-  return { id, map, last: keys.sort().at(-1), title: field.description || field.title || id, units: field.units || '' }
+  return { id, map, nulls, last: keys.sort().at(-1), title: field.description || field.title || id, units: field.units || '' }
 }
 
 /**
@@ -102,18 +105,49 @@ export function seasonalAdjust(y, firstMonth) {
   return y.map((v, t) => v / (f[(firstMonth + t) % 12] / mean))
 }
 
-// Aplica seasonalAdjust al último tramo continuo de un arreglo con huecos
+// Aplica seasonalAdjust a una serie con huecos: los meses faltantes se interpolan (en logaritmos) SOLO para
+// estimar los factores estacionales; la salida queda vacía en los meses que no tienen dato original.
 function adjustArray(arr, months) {
-  let end = arr.length - 1
-  while (end >= 0 && arr[end] == null) end--
-  let start = end
-  while (start > 0 && arr[start - 1] != null) start--
-  if (end < 0) return null
-  const sa = seasonalAdjust(arr.slice(start, end + 1), (+months[start].slice(5, 7) - 1))
+  const first = arr.findIndex((v) => v != null)
+  let last = arr.length - 1
+  while (last >= 0 && arr[last] == null) last--
+  if (first < 0 || last - first + 1 < 48) return null
+  const seg = arr.slice(first, last + 1)
+  const missing = seg.filter((v) => v == null).length
+  if (missing / seg.length > 0.25 || seg.some((v) => v != null && !(v > 0))) return null
+  const filled = seg.slice()
+  for (let i = 0; i < filled.length; i++) {
+    if (filled[i] != null) continue
+    let a = i - 1, b = i + 1
+    while (filled[b] == null) b++
+    const w = (i - a) / (b - a)
+    filled[i] = Math.exp(Math.log(filled[a]) * (1 - w) + Math.log(filled[b]) * w)
+  }
+  const sa = seasonalAdjust(filled, +months[first].slice(5, 7) - 1)
   if (!sa) return null
   const out = new Array(arr.length).fill(null)
-  sa.forEach((v, i) => (out[start + i] = +v.toFixed(4)))
+  sa.forEach((v, i) => { if (seg[i] != null) out[first + i] = +v.toFixed(4) })
   return out
+}
+
+// Reconstruye meses vacíos de un nivel usando la variación oficial publicada (interanual o mensual).
+const scaleOf = (v) => (Math.max(...v.filter((x) => x != null).map(Math.abs)) <= 1.5 ? 1 : 0.01) // fracción o %
+function fillFromYoy(level, yoy, months) {
+  const sc = scaleOf(yoy), done = []
+  for (let i = 12; i < level.length; i++) if (level[i] == null && level[i - 12] != null && yoy[i] != null) { level[i] = +(level[i - 12] * (1 + yoy[i] * sc)).toFixed(4); done.push(months[i]) }
+  return done
+}
+function fillFromMom(level, mom, months) {
+  const sc = scaleOf(mom), done = []
+  for (let i = 1; i < level.length; i++) if (level[i] == null && level[i - 1] != null && mom[i] != null) { level[i] = +(level[i - 1] * (1 + mom[i] * sc)).toFixed(4); done.push(months[i]) }
+  for (let i = level.length - 2; i >= 0; i--) if (level[i] == null && level[i + 1] != null && mom[i + 1] != null) { level[i] = +(level[i + 1] / (1 + mom[i + 1] * sc)).toFixed(4); done.push(months[i]) }
+  return done
+}
+const gapsOf = (arr, months) => {
+  const f = arr.findIndex((v) => v != null)
+  let l = arr.length - 1
+  while (l >= 0 && arr[l] == null) l--
+  return f < 0 ? [] : months.slice(f, l + 1).filter((_, i) => arr[f + i] == null)
 }
 
 const mm = (a) => a.map((x, i) => (i > 0 && x != null && a[i - 1] != null ? x / a[i - 1] - 1 : null))
@@ -149,7 +183,13 @@ async function run() {
   }
 
   await Promise.all(SERIES.map(async (c) => {
-    raw[c.key] = { orig: await get(overrides[c.key] ?? c.orig), sa: c.sa ? await get(overrides[`${c.key}_sa`] ?? c.sa) : null }
+    raw[c.key] = {
+      orig: await get(overrides[c.key] ?? c.orig),
+      sa: c.sa ? await get(overrides[`${c.key}_sa`] ?? c.sa) : null,
+      yoy: c.yoy ? await get(overrides[`${c.key}_yoy`] ?? c.yoy, false) : null,
+      mom: c.mom ? await get(overrides[`${c.key}_mom`] ?? c.mom, false) : null,
+      samom: c.samom ? await get(overrides[`${c.key}_samom`] ?? c.samom, false) : null,
+    }
   }))
 
   // eje mensual común
@@ -162,19 +202,25 @@ async function run() {
   const series = SERIES.map((c) => {
     const o = raw[c.key].orig, s = raw[c.key].sa
     const orig = align(o)
+    const filled = []
     let sa = null, saKind = null
     if (orig) {
-      if (s?.map) { sa = align(s); saKind = 'oficial' }
+      const R = raw[c.key]
+      if (R.yoy?.map) filled.push(...fillFromYoy(orig, align(R.yoy), months))
+      if (R.mom?.map) filled.push(...fillFromMom(orig, align(R.mom), months))
+      if (s?.map) { sa = align(s); saKind = 'oficial'; if (R.samom?.map) fillFromMom(sa, align(R.samom), months) }
       else if (c.group === 'Sectores') { sa = adjustArray(orig, months); saKind = sa ? 'propia' : null }
     }
     if (c.key === 'total' && orig && sa && saKind === 'oficial') {
       const own = adjustArray(orig, months)
       if (own) ctrl = control(own, sa)
     }
-    log.push(`${(o?.status ?? 'missing').padEnd(8)} ${c.key.padEnd(6)} ${o?.id ?? c.orig}${saKind ? '  [SA ' + saKind + ']' : ''}${o?.units && o.status === 'rejected' ? '  unidades: ' + o.units : ''}`)
+    const gaps = orig ? gapsOf(orig, months) : []
+    log.push(`${(o?.status ?? 'missing').padEnd(8)} ${c.key.padEnd(6)} ${o?.id ?? c.orig}${saKind ? '  [SA ' + saKind + ']' : ''}${o?.nulls?.length ? `  API-null:${o.nulls.length}` : ''}${filled.length ? `  reconstruidos:${filled.join(',')}` : ''}${gaps.length ? `  FALTAN:${gaps.length} (${gaps.slice(-6).join(',')}${gaps.length > 6 ? ',…' : ''})` : ''}${o?.units && o.status === 'rejected' ? '  unidades: ' + o.units : ''}`)
     return {
       key: c.key, label: c.label, group: c.group, id: o?.id ?? c.orig, status: o?.status ?? 'missing',
       title: o?.title ?? null, last: o?.last ?? null, saId: s?.id ?? null, saKind, orig, sa,
+      gaps, filled, apiNulls: o?.nulls?.length ?? 0,
     }
   })
 
@@ -185,11 +231,13 @@ async function run() {
 
   // caché de la última descarga buena
   const fresh = {}
-  for (const r of Object.values(raw)) for (const h of [r.orig, r.sa]) if (h?.map && ['ok', 'stale'].includes(h.status)) fresh[h.id] = { id: h.id, map: h.map, last: h.last, title: h.title, units: h.units }
+  for (const r of Object.values(raw)) for (const h of [r.orig, r.sa, r.yoy, r.mom, r.samom]) if (h?.map && ['ok', 'stale'].includes(h.status)) fresh[h.id] = { id: h.id, map: h.map, last: h.last, title: h.title, units: h.units }
   if (Object.keys(fresh).length) { try { fs.writeFileSync(CACHE, JSON.stringify({ fetchedAt: meta.fetchedAt, raw: { ...cache.raw, ...fresh } })) } catch {} }
 
   console.log(`[econsur] EMAE → ${path.relative(ROOT, OUT)} | ${ok}/${series.length} series | ${meta.start ?? '—'} a ${meta.end ?? '—'}${ctrl ? ` | control SA propia vs oficial: corr ${ctrl.corr}` : ''}`)
   const bad = series.filter((s) => !s.orig)
+  const withGaps = series.filter((x) => x.gaps?.length)
+  if (withGaps.length) console.log(`[econsur] EMAE con meses faltantes en la API: ${withGaps.map((x) => `${x.key}(${x.gaps.length})`).join(', ')}`)
   if (bad.length) console.log(`[econsur] EMAE sin datos: ${bad.map((s) => s.key).join(', ')} (fijá el ID en data/series-overrides.json)`)
   if (process.env.SERIES_VERBOSE) console.log(log.join('\n'))
 }

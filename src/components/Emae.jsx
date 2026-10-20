@@ -23,8 +23,8 @@ const ytdYoy = (a, months) => a.map((_, i) => {
 })
 
 const MODES = [
-  { id: 'nivel', label: 'Nivel original', kind: 'num', fn: (s) => s.orig, desc: 'Índice base 2004=100, serie original.' },
-  { id: 'nivel_sa', label: 'Nivel desest.', kind: 'num', fn: (s) => s.sa, needsSA: true, desc: 'Índice desestacionalizado: oficial del INDEC para el nivel general; estimación propia para los sectores.' },
+  { id: 'nivel', label: 'Nivel original', kind: 'idx', fn: (s) => s.orig, desc: 'Índice base 2004=100, serie original.' },
+  { id: 'nivel_sa', label: 'Nivel desest.', kind: 'idx', fn: (s) => s.sa, needsSA: true, desc: 'Índice desestacionalizado: oficial del INDEC para el nivel general; estimación propia para los sectores.' },
   { id: 'm', label: 'Mensual', kind: 'pct', fn: (s) => pc(s.orig, 1), desc: 'Variación del mes contra el mes anterior (serie original, incluye estacionalidad).' },
   { id: 'q', label: 'Trimestral', kind: 'pct', fn: (s) => pc(ma3(s.orig), 3), desc: 'Promedio de los últimos 3 meses contra el promedio de los 3 meses previos (trimestre móvil).' },
   { id: 'yoy', label: 'Mensual i.a.', kind: 'pct', fn: (s) => pc(s.orig, 12), desc: 'Variación del mes contra el mismo mes del año anterior.' },
@@ -42,7 +42,7 @@ function SeriesPanel({ s, mode, vals, from, to, onClose }) {
     return () => window.removeEventListener('keydown', h)
   }, [onClose])
   const idx = Array.from({ length: to - from + 1 }, (_, i) => from + i)
-  const isLevel = mode.kind === 'num'
+  const isLevel = mode.kind === 'idx'
   const data = idx.map((i) => ({
     label: ml(emae.months[i]), v: vals[i], o: s.orig?.[i] ?? null, sa: s.sa?.[i] ?? null,
   }))
@@ -90,6 +90,8 @@ function SeriesPanel({ s, mode, vals, from, to, onClose }) {
           <div><dt>Desestacionalización</dt><dd>{s.saKind === 'oficial' ? 'Serie oficial del INDEC' : s.saKind === 'propia' ? 'Estimación propia (descomposición clásica multiplicativa)' : 'No disponible'}</dd></div>
           {s.title && <div><dt>Descripción</dt><dd>{s.title}</dd></div>}
           {s.last && <div><dt>Último dato</dt><dd>{mlong(s.last)}</dd></div>}
+          {s.filled?.length > 0 && <div><dt>Meses reconstruidos</dt><dd>{s.filled.map(mlong).join(', ')} (calculados con la variación oficial publicada en la API)</dd></div>}
+          {s.gaps?.length > 0 && <div><dt>Meses sin dato en la API</dt><dd className="warn">{s.gaps.length}: {s.gaps.slice(-12).map(ml).join(', ')}{s.gaps.length > 12 ? ', …' : ''}</dd></div>}
           {s.status === 'stale' && <div><dt>Estado</dt><dd className="warn">Serie sin datos hace más de 2 años: revisá el ID en data/series-overrides.json.</dd></div>}
           {s.status === 'cache' && <div><dt>Estado</dt><dd className="warn">La API no respondió; se muestran los últimos datos guardados.</dd></div>}
           <div><dt>Consulta a la API</dt><dd><a href={`https://apis.datos.gob.ar/series/api/series/?ids=${s.id}&format=json`} target="_blank" rel="noreferrer">Ver datos en datos.gob.ar</a></dd></div>
@@ -131,6 +133,8 @@ export default function Emae({ query }) {
   const rows = emae.series.filter((s) => s.orig && (!q || s.label.toLowerCase().includes(q)))
   const missing = emae.series.filter((s) => !s.orig)
   const cell = (s, i) => { const v = computed[s.key]?.[i]; return v == null ? { v: null } : { v, k: mode.kind } }
+  const filledSet = useMemo(() => Object.fromEntries(emae.series.map((s) => [s.key, new Set(s.filled ?? [])])), [])
+  const gapSet = useMemo(() => Object.fromEntries(emae.series.map((s) => [s.key, new Set(s.gaps ?? [])])), [])
   const setPreset = (k) => { setTo(n - 1); setFrom(k ? Math.max(0, n - k) : 0) }
   const onFrom = (v) => { setFrom(+v); if (+v > to) setTo(+v) }
   const onTo = (v) => { setTo(+v); if (+v < from) setFrom(+v) }
@@ -190,9 +194,15 @@ export default function Emae({ query }) {
                 <tr key={s.key} className="data" tabIndex={0} onClick={() => setSel(s)} onKeyDown={(e) => e.key === 'Enter' && setSel(s)}>
                   <th scope="row" className="lbl">
                     {s.label}
+                    {(() => { const k = cols.filter((i) => gapSet[s.key].has(emae.months[i])).length; return k > 0 ? <small className="warn">{k} {k === 1 ? 'mes sin dato' : 'meses sin dato'} en el período</small> : null })()}
                     {mode.needsSA && <small>{s.saKind === 'oficial' ? 'desest. oficial INDEC' : s.saKind === 'propia' ? 'desest. estimación propia' : 'sin desestacionalizar'}</small>}
                   </th>
-                  {cols.map((i) => { const c = cell(s, i); return <td key={i} className={`num ${c.v == null ? 'na' : mode.kind === 'pct' ? tone(c) : ''}`}>{fmt(c)}</td> })}
+                  {cols.map((i) => {
+                    const c = cell(s, i), ym = emae.months[i]
+                    const isFilled = filledSet[s.key].has(ym), isGap = gapSet[s.key].has(ym)
+                    const title = isFilled ? 'Mes reconstruido con la variación oficial publicada (la API no trae el nivel)' : isGap ? 'Sin dato en la API de datos.gob.ar' : c.v == null ? 'No calculable: falta un dato de referencia' : undefined
+                    return <td key={i} title={title} className={`num ${c.v == null ? (isGap ? 'na gap' : 'na') : mode.kind === 'pct' ? tone(c) : ''} ${isFilled ? 'filled' : ''}`}>{fmt(c)}</td>
+                  })}
                 </tr>,
               ]
             })}
@@ -204,8 +214,25 @@ export default function Emae({ query }) {
         <li>Series originales (sin desestacionalizar) salvo en “Nivel desest.” y “Mensual desest.”. La variación mensual y el YTD de las series originales incluyen estacionalidad; para comparar sectores conviene la variación interanual o la mensual desestacionalizada.</li>
         <li>El INDEC publica la desestacionalizada solo para el nivel general. Las sectoriales se estiman acá con una descomposición clásica multiplicativa (media móvil centrada de 12 meses, factores estacionales de los últimos 10 años). No corrige efectos de calendario ni reemplaza el X-13 del INDEC: los números pueden diferir de los oficiales.{ctrl ? ` Control sobre el nivel general: la variación mensual de la estimación propia tiene correlación ${ctrl.corr.toLocaleString('es-AR')} con la oficial y un desvío medio de ${ctrl.madPp.toLocaleString('es-AR')} p.p. (últimos ${ctrl.months} meses).` : ''}</li>
         <li>Trimestral y trimestral i.a. usan el trimestre móvil (promedio de 3 meses). YTD compara contra diciembre del año anterior; YTD i.a. compara el acumulado enero-mes contra el del año anterior.</li>
+        <li>Los meses en blanco (“—”) son meses que la API de datos.gob.ar publica vacíos; las variaciones que dependen de ellos tampoco se pueden calcular. En el nivel general y la tendencia-ciclo, los meses vacíos se reconstruyen con las series oficiales de variación del INDEC (se muestran en cursiva); en los sectores no hay serie para reconstruirlos. La desestacionalización sectorial tolera huecos: los estima solo para calcular los factores y no inventa datos en los meses vacíos.</li>
         <li>Datos descargados el {new Date(emae.meta.fetchedAt).toLocaleDateString('es-AR', { day: 'numeric', month: 'long', year: 'numeric' })}. {emae.meta.ok} de {emae.meta.total} series disponibles.</li>
       </ul>
+      {(() => {
+        const w = emae.series.filter((x) => x.orig && (x.gaps?.length || x.filled?.length))
+        if (!w.length) return null
+        const recent = (x) => x.gaps.filter((m) => m >= emae.months[Math.max(0, n - 36)]).length
+        return (
+          <details className="missing" open>
+            <summary>Calidad de datos: {w.filter((x) => x.gaps.length).length} series con meses faltantes en la API</summary>
+            <div className="tablewrap" style={{ marginTop: 8, maxWidth: 760 }}>
+              <table>
+                <thead><tr><th className="lbl">Serie</th><th>Faltantes (total)</th><th>Faltantes (últ. 36 m)</th><th>Reconstruidos</th></tr></thead>
+                <tbody>{w.map((x) => <tr key={x.key}><th scope="row" className="lbl">{x.label}</th><td className="num">{x.gaps.length}</td><td className="num">{recent(x)}</td><td className="num">{x.filled.length}</td></tr>)}</tbody>
+              </table>
+            </div>
+          </details>
+        )
+      })()}
       {missing.length > 0 && (
         <details className="missing"><summary>{missing.length} series sin datos</summary>
           <p>No se encontró (o no respondió): {missing.map((s) => s.label).join(', ')}. Se pueden fijar en <code>data/series-overrides.json</code> con la clave de la serie ({missing.map((s) => s.key).join(', ')}).</p></details>
