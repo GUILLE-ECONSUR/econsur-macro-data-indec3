@@ -7,10 +7,11 @@
     "data": "node scripts/build-data.mjs",
     "series": "node scripts/build-series.mjs",
     "series:find": "node scripts/find-series.mjs",
-    "dev": "npm run data && npm run series && npm run emae && vite",
-    "build": "npm run data && npm run series && npm run emae && vite build",
+    "dev": "npm run data && npm run series && npm run emae && npm run ipi && vite",
+    "build": "npm run data && npm run series && npm run emae && npm run ipi && vite build",
     "preview": "vite preview",
-    "emae": "node scripts/build-emae.mjs"
+    "emae": "node scripts/build-emae.mjs",
+    "ipi": "node scripts/build-ipi.mjs"
   },
   "dependencies": {
     "react": "^18.3.1",

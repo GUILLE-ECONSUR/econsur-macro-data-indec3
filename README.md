@@ -40,6 +40,14 @@ API Series de Tiempo ──► scripts/build-series.mjs ──► src/data/serie
   en el build (descomposición clásica multiplicativa). Es una estimación, no el X-13 del INDEC; el build
   imprime un control contra la oficial del nivel general. Los IDs se pueden fijar en
   `data/series-overrides.json` (claves `total`, `tc`, `A`…`O`, `IN`; con sufijo `_sa` para la desest.).
+- La solapa **IPI manufacturero** (`scripts/build-ipi.mjs` + `scripts/ipi-config.mjs`) tiene la misma estructura
+  que EMAE con el nivel general y 84 divisiones y subclases del IPI, **ordenadas por cadena productiva**:
+  agroindustria → textiles y cuero → madera y papel → refinación → química, caucho y plástico → minerales no
+  metálicos (construcción) → metales básicos → maquinaria y equipos (bienes de capital) → automotriz y transporte
+  → muebles y otras. Cada bloque muestra primero la división (negrita) y debajo sus subclases. Para reordenar o
+  corregir la jerarquía basta con editar `ipi-config.mjs`; para fijar un ID, usar `data/series-overrides.json`
+  con la clave de la serie (`SERIES_VERBOSE=1 npm run ipi` las imprime). Las desestacionalizadas de divisiones y
+  subclases son estimación propia (la oficial solo existe para el nivel general).
 - **Meses faltantes en el EMAE:** si la API publica un mes vacío, la tabla lo muestra como “—” (con trama),
   avisa cuántos meses faltan en el período y lista las series afectadas en “Calidad de datos”. Para el nivel
   general y la tendencia-ciclo, el build reconstruye esos meses con las series oficiales de variación
@@ -96,6 +104,7 @@ Requiere Node 18 o superior.
 | `data/indicadores.xlsx` | Excel fuente (lo único que se actualiza) |
 | `scripts/build-data.mjs` | Parser Excel → JSON |
 | `scripts/series-config.mjs` | Catálogo de series históricas (IDs, agregación, tipo) |
+| `scripts/build-ipi.mjs`, `ipi-config.mjs` | IPI manufacturero por división/subclase (orden productivo) |
 | `scripts/build-emae.mjs` | EMAE mensual por sector + desestacionalización |
 | `scripts/build-series.mjs` | Descarga y trimestraliza series de datos.gob.ar |
 | `data/series-overrides.json` | IDs fijados a mano (opcional) |

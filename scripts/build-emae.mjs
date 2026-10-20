@@ -39,8 +39,8 @@ const SERIES = [
 ]
 
 const readJSON = (f, d) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')) } catch { return d } }
-const ymIdx = (ym) => +ym.slice(0, 4) * 12 + (+ym.slice(5, 7) - 1)
-const idxYm = (i) => `${Math.floor(i / 12)}-${String((i % 12) + 1).padStart(2, '0')}`
+export const ymIdx = (ym) => +ym.slice(0, 4) * 12 + (+ym.slice(5, 7) - 1)
+export const idxYm = (i) => `${Math.floor(i / 12)}-${String((i % 12) + 1).padStart(2, '0')}`
 
 async function getJSON(url, tries = 3) {
   let err
@@ -57,7 +57,7 @@ async function getJSON(url, tries = 3) {
   throw err
 }
 
-async function fetchMonthly(id) {
+export async function fetchMonthly(id) {
   const rows = []
   let meta = null
   for (let start = 0; start <= 10000; start += 1000) {
@@ -107,7 +107,7 @@ export function seasonalAdjust(y, firstMonth) {
 
 // Aplica seasonalAdjust a una serie con huecos: los meses faltantes se interpolan (en logaritmos) SOLO para
 // estimar los factores estacionales; la salida queda vacía en los meses que no tienen dato original.
-function adjustArray(arr, months) {
+export function adjustArray(arr, months) {
   const first = arr.findIndex((v) => v != null)
   let last = arr.length - 1
   while (last >= 0 && arr[last] == null) last--
@@ -143,7 +143,7 @@ function fillFromMom(level, mom, months) {
   for (let i = level.length - 2; i >= 0; i--) if (level[i] == null && level[i + 1] != null && mom[i + 1] != null) { level[i] = +(level[i + 1] / (1 + mom[i + 1] * sc)).toFixed(4); done.push(months[i]) }
   return done
 }
-const gapsOf = (arr, months) => {
+export const gapsOf = (arr, months) => {
   const f = arr.findIndex((v) => v != null)
   let l = arr.length - 1
   while (l >= 0 && arr[l] == null) l--
@@ -151,7 +151,7 @@ const gapsOf = (arr, months) => {
 }
 
 const mm = (a) => a.map((x, i) => (i > 0 && x != null && a[i - 1] != null ? x / a[i - 1] - 1 : null))
-function control(own, official) {
+export function control(own, official) {
   const a = [], b = []
   const x = mm(own), y = mm(official)
   for (let i = Math.max(0, own.length - 120); i < own.length; i++) if (x[i] != null && y[i] != null) { a.push(x[i]); b.push(y[i]) }

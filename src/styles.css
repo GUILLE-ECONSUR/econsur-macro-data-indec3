@@ -133,3 +133,6 @@ footer { max-width: 1480px; margin: 0 auto; padding: 0 clamp(12px, 3vw, 32px) 40
 td.filled { font-style: italic; text-decoration: underline dotted var(--muted); text-underline-offset: 3px; }
 td.gap { background: repeating-linear-gradient(135deg, transparent 0 6px, var(--zebra) 6px 12px); }
 .hist tbody th.lbl small.warn { color: var(--neg); }
+
+.hist tbody th.lbl.head { font-weight: 700; }
+.hist tbody th.lbl { min-width: 260px; }
